@@ -1,133 +1,204 @@
 import asyncio
 import os
+import re
 import requests
 from bs4 import BeautifulSoup
-from telegram import Bot
+
+from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-# ================= ENV =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-PORT = int(os.environ.get("PORT", 8000))
 
 bot = Bot(BOT_TOKEN)
 posted = set()
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
-# ================= HEALTH SERVER =================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
-
-def run_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    print(f"🌐 Health server running on port {PORT}")
-    server.serve_forever()
 
 # ================= DRIVER =================
 def get_driver():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.binary_location = "/usr/bin/chromium"
+    return webdriver.Chrome(options=options)
+
+
+# ================= METHOD 1: HTML =================
+def extract_html(html):
+    dm = None
+    m3u8 = None
+
+    dm_match = re.search(r'dailymotion.*?/video/([a-zA-Z0-9]+)', html)
+    if dm_match:
+        dm = f"https://www.dailymotion.com/video/{dm_match.group(1)}"
+
+    m3u8_match = re.search(r'https://[^"]+\.m3u8[^"]*', html)
+    if m3u8_match:
+        m3u8 = m3u8_match.group(0)
+
+    return dm, m3u8
+
+
+# ================= METHOD 2: REQUEST =================
+def extract_requests(url):
     try:
-        options = Options()
-        options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920x1080")
+        r = requests.get(url, headers=headers, timeout=10)
+        return extract_html(r.text)
+    except:
+        return None, None
 
-        options.binary_location = "/usr/bin/chromium"
 
-        driver = webdriver.Chrome(options=options)
-        return driver
-    except Exception as e:
-        print("❌ Selenium failed:", e)
-        return None
+# ================= METHOD 3: API DETECT =================
+def extract_api(html):
+    dm = None
 
-# ================= EXTRACT =================
-def extract_video(url):
+    # common JSON player
+    match = re.search(r'"videoId":"(.*?)"', html)
+    if match:
+        dm = f"https://www.dailymotion.com/video/{match.group(1)}"
+
+    return dm, None
+
+
+# ================= METHOD 4: SELENIUM =================
+def extract_selenium(url):
     driver = get_driver()
-
-    if not driver:
-        return None
-
     driver.get(url)
-    video_url = None
+
+    dm = None
+    m3u8 = None
 
     try:
         import time
-        time.sleep(5)
+        time.sleep(6)
 
-        # 🔥 find iframe
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        html = driver.page_source
 
-        for iframe in iframes:
-            src = iframe.get_attribute("src")
-            if src and "dailymotion" in src:
-                video_url = src
-                break
+        dm, m3u8 = extract_html(html)
 
-        # 🔥 fallback → search page
-        if not video_url:
-            html = driver.page_source
-
-            import re
-            match = re.search(r'https://[^"]*dailymotion[^"]+', html)
-            if match:
-                video_url = match.group(0)
+        # try iframe click
+        if not dm:
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe in iframes:
+                src = iframe.get_attribute("src")
+                if src and "dailymotion" in src:
+                    vid = re.search(r'/video/([a-zA-Z0-9]+)', src)
+                    if vid:
+                        dm = f"https://www.dailymotion.com/video/{vid.group(1)}"
+                        break
 
     except Exception as e:
-        print("Extract error:", e)
+        print("Selenium error:", e)
 
     driver.quit()
-    return video_url
+    return dm, m3u8
 
-# ================= SCRAPER =================
-def get_posts():
-    url = "https://luciferdonghua.in/"
-    r = requests.get(url, headers=headers)
-    soup = BeautifulSoup(r.text, "html.parser")
 
-    posts = []
+# ================= MASTER EXTRACT =================
+def extract_video(url):
+    # 1️⃣ Fast method
+    dm, m3u8 = extract_requests(url)
+    if dm or m3u8:
+        return dm, m3u8
 
-    for a in soup.find_all("a"):
-        link = a.get("href")
+    # 2️⃣ API sniff
+    try:
+        r = requests.get(url, headers=headers)
+        dm2, _ = extract_api(r.text)
+        if dm2:
+            return dm2, None
+    except:
+        pass
 
-        if not link or "episode" not in link:
-            continue
+    # 3️⃣ Selenium fallback
+    return extract_selenium(url)
 
-        title = a.text.strip()
 
-        img = None
-        img_tag = a.find("img")
-        if img_tag:
-            img = img_tag.get("src")
+# ================= GENERIC SCRAPER =================
+def scrape_site(base_url):
+    try:
+        r = requests.get(base_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-        posts.append((title, link, img))
+        posts = []
 
-    return posts[:5]
+        for a in soup.find_all("a", href=True):
+            link = a["href"]
 
-# ================= SEND =================
-async def send_post(title, link, img):
-    video = await asyncio.to_thread(extract_video, link)
+            if "episode" not in link.lower():
+                continue
 
-    text = f"""
-📺 <b>{title}</b>
+            title = a.get_text(strip=True)
+            if not title:
+                continue
+
+            img = None
+            img_tag = a.find("img")
+            if img_tag:
+                img = img_tag.get("src")
+
+            posts.append((title, link, img))
+
+        return posts[:5]
+
+    except Exception as e:
+        print(f"Error scraping {base_url}:", e)
+        return []
+
+
+# ================= SITES =================
+SITES = [
+    "https://animexin.dev",
+    "https://luciferdonghua.in",
+    "https://animecube.live",
+    "https://donghuafun.com",
+    "https://anichin.care",
+    "https://donghuazone.com",
+    "https://donghuastream.org",
+    "https://animekhor.org",
+    "https://yunshanid.site",
+    "https://dongstream.com",
+    "https://topchineseanime.online",
+    "https://animedonghua.io",
+    "https://myanime.live"
+]
+
+
+# ================= FORMAT =================
+def format_text(title, link):
+    ep = re.search(r'(\d+)', title)
+    ep_num = ep.group(1) if ep else "?"
+
+    return f"""📺 <b>{title}</b>
+
+Ep {ep_num}
 
 🔗 <a href="{link}">Watch</a>
 """
 
-    if video:
-        text += f"\n🎬 <a href='{video}'>Stream</a>"
+
+# ================= SEND =================
+async def send_post(title, link, img):
+    dm, m3u8 = await asyncio.to_thread(extract_video, link)
+
+    text = format_text(title, link)
+
+    buttons = []
+
+    if dm:
+        buttons.append([InlineKeyboardButton("▶️ Watch", url=dm)])
+
+    if m3u8:
+        buttons.append([InlineKeyboardButton("📡 Stream", url=m3u8)])
+
+    keyboard = InlineKeyboardMarkup(buttons) if buttons else None
 
     try:
         if img:
@@ -135,43 +206,47 @@ async def send_post(title, link, img):
                 chat_id=CHANNEL_ID,
                 photo=img,
                 caption=text,
-                parse_mode=ParseMode.HTML
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard
             )
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=text,
-                parse_mode=ParseMode.HTML
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard
             )
 
-        await asyncio.sleep(3)
+        await asyncio.sleep(4)
 
     except Exception as e:
         print("Send Error:", e)
 
+
 # ================= MAIN =================
 async def main():
-    print("🔥 Bot Running...")
+    print("🔥 ULTIMATE BOT RUNNING")
 
     while True:
-        print("🔄 Checking Lucifer...")
+        print("🔄 Checking all sites...")
 
-        posts = get_posts()
+        for site in SITES:
+            print("🌐", site)
 
-        for title, link, img in posts:
-            if link in posted:
-                continue
+            posts = scrape_site(site)
 
-            posted.add(link)
-            print("🆕", title)
+            for title, link, img in posts:
+                if link in posted:
+                    continue
 
-            await send_post(title, link, img)
+                posted.add(link)
+                print("🆕", title)
 
-        await asyncio.sleep(60)
+                await send_post(title, link, img)
+
+        await asyncio.sleep(180)
+
 
 # ================= START =================
 if __name__ == "__main__":
-    # start health server (for koyeb)
-    threading.Thread(target=run_server, daemon=True).start()
-
     asyncio.run(main())
