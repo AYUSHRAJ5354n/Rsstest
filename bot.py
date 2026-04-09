@@ -76,6 +76,7 @@ async def deactive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "📊 Site Status:\n\n"
+
     for s, v in SITE_STATUS.items():
         msg += f"{s} → {'✅ ON' if v else '❌ OFF'}\n"
 
@@ -90,10 +91,10 @@ async def send_post(app, title, link, img, site):
     buttons = []
 
     if dm:
-        buttons.append([InlineKeyboardButton("▶️ Watch", url=dm)])
+        buttons.append([InlineKeyboardButton("▶️ Dailymotion", url=dm)])
 
     if m3u8:
-        buttons.append([InlineKeyboardButton("📡 Stream", url=m3u8)])
+        buttons.append([InlineKeyboardButton("📡 M3U8", url=m3u8)])
 
     keyboard = InlineKeyboardMarkup(buttons) if buttons else None
 
@@ -117,6 +118,7 @@ async def send_post(app, title, link, img, site):
                 reply_markup=keyboard
             )
 
+        # 🔥 anti flood
         await asyncio.sleep(5)
 
     except Exception as e:
@@ -126,11 +128,12 @@ async def send_post(app, title, link, img, site):
 # ===== MAIN LOOP =====
 
 async def main_loop(app):
-    print("🔥 Running...")
+    print("🔥 Scraper loop started...")
 
     while True:
         for site_name, site_url in SITES.items():
 
+            # skip disabled sites
             if not SITE_STATUS[site_name]:
                 continue
 
@@ -143,24 +146,31 @@ async def main_loop(app):
                 posted.add(link)
 
                 print(f"🆕 [{site_name}] {title}")
+
                 await send_post(app, title, link, img, site_name)
 
         await asyncio.sleep(180)
 
 
-# ===== MAIN =====
+# ===== START BOT (FIXED LOOP) =====
 
-async def main():
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # commands
     app.add_handler(CommandHandler("active", active))
     app.add_handler(CommandHandler("deactive", deactive))
     app.add_handler(CommandHandler("status", status))
 
-    asyncio.create_task(main_loop(app))
+    # 🔥 SAFE BACKGROUND TASK (NO LOOP ERROR)
+    async def start_background(app):
+        asyncio.create_task(main_loop(app))
 
-    await app.run_polling()
+    app.post_init = start_background
+
+    print("🚀 Bot starting...")
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
