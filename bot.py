@@ -9,29 +9,30 @@ from scraper.sites import scrape_site
 from extractors.animexin import extract_animexin
 from extractors.lucifer import extract_lucifer
 from extractors.myanime import extract_myanime
+from extractors.yunshanid import extract_yunshanid
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 
-# ===== SITE CONTROL (LOWERCASE FIX) =====
 SITE_STATUS = {
     "animexin": True,
-    "luci": True,
+    "luci": False,
     "myanime": True,
+    "yunshan": True,
 }
 
 SITES = {
     "animexin": "https://animexin.dev",
     "luci": "https://luciferdonghua.in",
     "myanime": "https://myanime.live",
+    "yunshan": "https://yunshanid.site",
 }
 
 posted = set()
 
 
-# ===== ROUTER =====
 def extract_video(site, url):
     if site == "animexin":
         return extract_animexin(url)
@@ -42,35 +43,26 @@ def extract_video(site, url):
     elif site == "myanime":
         return extract_myanime(url)
 
+    elif site == "yunshan":
+        return extract_yunshanid(url)
+
     return None, None
 
 
-# ===== COMMANDS (FIXED LOWERCASE MATCH) =====
-
 async def active(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Usage: /active animexin")
-
     site = context.args[0].lower()
 
     if site in SITE_STATUS:
         SITE_STATUS[site] = True
         await update.message.reply_text(f"✅ {site} Enabled")
-    else:
-        await update.message.reply_text("❌ Invalid site")
 
 
 async def deactive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Usage: /deactive animexin")
-
     site = context.args[0].lower()
 
     if site in SITE_STATUS:
         SITE_STATUS[site] = False
         await update.message.reply_text(f"❌ {site} Disabled")
-    else:
-        await update.message.reply_text("❌ Invalid site")
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,8 +73,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-
-# ===== SEND POST =====
 
 async def send_post(app, title, link, img, site):
     dm, m3u8 = await asyncio.to_thread(extract_video, site, link)
@@ -123,15 +113,12 @@ async def send_post(app, title, link, img, site):
         print("Send Error:", e)
 
 
-# ===== MAIN LOOP (FIXED CHECK) =====
-
 async def main_loop(app):
     print("🔥 Scraper running...")
 
     while True:
         for site_name, site_url in SITES.items():
 
-            # ✅ FIXED: strict check
             if not SITE_STATUS.get(site_name, False):
                 continue
 
@@ -148,8 +135,6 @@ async def main_loop(app):
 
         await asyncio.sleep(180)
 
-
-# ===== START BOT (FIXED EVENT LOOP) =====
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
