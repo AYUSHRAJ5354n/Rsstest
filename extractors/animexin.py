@@ -8,19 +8,29 @@ headers = {"User-Agent": "Mozilla/5.0"}
 def extract_animexin(url):
     try:
         r = requests.get(url, headers=headers)
-        soup = BeautifulSoup(r.text, "html.parser")
+        html = r.text
 
+        soup = BeautifulSoup(html, "html.parser")
+
+        # iframe method
         iframe = soup.find("iframe")
 
         if iframe:
             src = iframe.get("src")
 
-            if "dailymotion" in src:
+            if src and "dailymotion" in src:
                 vid = re.search(r'/video/([a-zA-Z0-9]+)', src)
                 if vid:
                     dm = f"https://www.dailymotion.com/video/{vid.group(1)}"
                     m3u8 = get_dm_m3u8(dm)
                     return dm, m3u8
+
+        # fallback
+        match = re.search(r'dailymotion.*?/video/([a-zA-Z0-9]+)', html)
+        if match:
+            dm = f"https://www.dailymotion.com/video/{match.group(1)}"
+            m3u8 = get_dm_m3u8(dm)
+            return dm, m3u8
 
         return None, None
 
