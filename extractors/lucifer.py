@@ -1,45 +1,61 @@
-import requests
 import re
-from bs4 import BeautifulSoup
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from .common import get_dm_m3u8
 
-headers = {"User-Agent": "Mozilla/5.0"}
+def get_driver():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.binary_location = "/usr/bin/chromium"
+    return webdriver.Chrome(options=options)
+
 
 def extract_lucifer(url):
+    driver = get_driver()
+
     try:
-        r = requests.get(url, headers=headers)
-        html = r.text
+        # 🔥 TRY /v/1/ to /v/4/
+        for i in range(1, 5):
+            test_url = url.rstrip("/") + f"/v/{i}/"
+            print("Trying:", test_url)
 
-        soup = BeautifulSoup(html, "html.parser")
+            driver.get(test_url)
+            time.sleep(5)
 
-        # 1. Try iframe (rare case)
-        for iframe in soup.find_all("iframe"):
-            src = iframe.get("src")
-            if src and "dailymotion" in src:
-                vid = re.search(r'/video/([a-zA-Z0-9]+)', src)
-                if vid:
-                    dm = f"https://www.dailymotion.com/video/{vid.group(1)}"
-                    m3u8 = get_dm_m3u8(dm)
-                    return dm, m3u8
+            html = driver.page_source
 
-        # 2. Search in scripts (MAIN METHOD)
-        scripts = soup.find_all("script")
+            match = re.search(r'dailymotion.*?/video/([a-zA-Z0-9]+)', html)
 
-        for script in scripts:
-            if script.string:
-                matches = re.findall(r'https?://www\.dailymotion\.com/embed/video/[a-zA-Z0-9]+', script.string)
+            if match:
+                vid = match.group(1)
+                dm = f"https://www.dailymotion.com/video/{vid}"
+                m3u8 = get_dm_m3u8(dm)
 
-                if matches:
-                    embed = matches[0]
+                driver.quit()
+                return dm, m3u8
 
-                    vid = re.search(r'/video/([a-zA-Z0-9]+)', embed)
-                    if vid:
-                        dm = f"https://www.dailymotion.com/video/{vid.group(1)}"
-                        m3u8 = get_dm_m3u8(dm)
-                        return dm, m3u8
+        # fallback main page
+        driver.get(url)
+        time.sleep(5)
 
+        html = driver.page_source
+        match = re.search(r'dailymotion.*?/video/([a-zA-Z0-9]+)', html)
+
+        if match:
+            vid = match.group(1)
+            dm = f"https://www.dailymotion.com/video/{vid}"
+            m3u8 = get_dm_m3u8(dm)
+
+            driver.quit()
+            return dm, m3u8
+
+        driver.quit()
         return None, None
 
     except Exception as e:
         print("Lucifer error:", e)
+        driver.quit()
         return None, None
