@@ -9,43 +9,65 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 # ================= ENV =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+PORT = int(os.environ.get("PORT", 8000))
 
 bot = Bot(BOT_TOKEN)
 posted = set()
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
+# ================= HEALTH SERVER =================
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    print(f"🌐 Health server running on port {PORT}")
+    server.serve_forever()
+
 # ================= DRIVER =================
 def get_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920x1080")
+    try:
+        options = Options()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920x1080")
 
-    # Required for Railway/Koyeb
-    options.binary_location = "/usr/bin/chromium"
+        options.binary_location = "/usr/bin/chromium"
 
-    driver = webdriver.Chrome(options=options)
-    return driver
-
+        driver = webdriver.Chrome(options=options)
+        return driver
+    except Exception as e:
+        print("❌ Selenium failed:", e)
+        return None
 
 # ================= EXTRACT =================
 def extract_video(url):
     driver = get_driver()
-    driver.get(url)
 
+    if not driver:
+        return None
+
+    driver.get(url)
     video_url = None
 
     try:
         import time
         time.sleep(5)
 
-        # check iframe first
+        # 🔥 find iframe
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
 
         for iframe in iframes:
@@ -54,7 +76,7 @@ def extract_video(url):
                 video_url = src
                 break
 
-        # fallback → search html
+        # 🔥 fallback → search page
         if not video_url:
             html = driver.page_source
 
@@ -68,7 +90,6 @@ def extract_video(url):
 
     driver.quit()
     return video_url
-
 
 # ================= SCRAPER =================
 def get_posts():
@@ -94,7 +115,6 @@ def get_posts():
         posts.append((title, link, img))
 
     return posts[:5]
-
 
 # ================= SEND =================
 async def send_post(title, link, img):
@@ -129,7 +149,6 @@ async def send_post(title, link, img):
     except Exception as e:
         print("Send Error:", e)
 
-
 # ================= MAIN =================
 async def main():
     print("🔥 Bot Running...")
@@ -150,6 +169,9 @@ async def main():
 
         await asyncio.sleep(60)
 
-
+# ================= START =================
 if __name__ == "__main__":
+    # start health server (for koyeb)
+    threading.Thread(target=run_server, daemon=True).start()
+
     asyncio.run(main())
