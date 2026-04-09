@@ -1,5 +1,34 @@
-import requests
 import re
+import asyncio
+import aiohttp
+
+METADATA_URL = (
+    "https://www.dailymotion.com/player/metadata/video/{vid}"
+    "?embedder=https%3A%2F%2Fwww.dailymotion.com&locale=en_US"
+)
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://www.dailymotion.com/",
+    "Accept": "application/json, text/plain, */*",
+}
+
+async def resolve_dm_async(video_id):
+    url = METADATA_URL.format(vid=video_id)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=HEADERS) as resp:
+            data = await resp.json(content_type=None)
+
+            qualities = data.get("qualities", {})
+            auto = qualities.get("auto", [])
+
+            for item in auto:
+                if item.get("type") == "application/x-mpegURL":
+                    return item.get("url")
+
+    return None
+
 
 def get_dm_m3u8(dm_url):
     try:
@@ -9,17 +38,7 @@ def get_dm_m3u8(dm_url):
 
         vid = vid.group(1)
 
-        api = f"https://www.dailymotion.com/player/metadata/video/{vid}"
-        data = requests.get(api).json()
-
-        # BEST QUALITY
-        qualities = data.get("qualities", {})
-
-        for q in ["1080", "720", "480", "380"]:
-            if q in qualities:
-                return qualities[q][0]["url"]
-
-        return None
+        return asyncio.run(resolve_dm_async(vid))
 
     except Exception as e:
         print("M3U8 Error:", e)
