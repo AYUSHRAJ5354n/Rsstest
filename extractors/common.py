@@ -1,6 +1,6 @@
 import re
-import asyncio
 import aiohttp
+import asyncio
 
 METADATA_URL = (
     "https://www.dailymotion.com/player/metadata/video/{vid}"
@@ -10,36 +10,53 @@ METADATA_URL = (
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Referer": "https://www.dailymotion.com/",
-    "Accept": "application/json, text/plain, */*",
 }
 
-async def resolve_dm_async(video_id):
-    url = METADATA_URL.format(vid=video_id)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=HEADERS) as resp:
-            data = await resp.json(content_type=None)
+def extract_video_id(url):
+    if not url:
+        return None
 
-            qualities = data.get("qualities", {})
-            auto = qualities.get("auto", [])
+    # normal
+    match = re.search(r'/video/([a-zA-Z0-9]+)', url)
+    if match:
+        return match.group(1)
 
-            for item in auto:
-                if item.get("type") == "application/x-mpegURL":
-                    return item.get("url")
+    # short
+    match = re.search(r'dai\.ly/([a-zA-Z0-9]+)', url)
+    if match:
+        return match.group(1)
 
     return None
 
 
-def get_dm_m3u8(dm_url):
+def get_dm_m3u8(url):
+    vid = extract_video_id(url)
+    if not vid:
+        return None
+
+    return asyncio.run(fetch_m3u8(vid))
+
+
+async def fetch_m3u8(video_id):
+    api_url = METADATA_URL.format(vid=video_id)
+
     try:
-        vid = re.search(r'/video/([a-zA-Z0-9]+)', dm_url)
-        if not vid:
-            return None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, headers=HEADERS) as resp:
+                if resp.status != 200:
+                    return None
 
-        vid = vid.group(1)
+                data = await resp.json(content_type=None)
 
-        return asyncio.run(resolve_dm_async(vid))
+                qualities = data.get("qualities", {})
+                auto = qualities.get("auto", [])
+
+                for item in auto:
+                    if item.get("type") == "application/x-mpegURL":
+                        return item.get("url")
 
     except Exception as e:
-        print("M3U8 Error:", e)
-        return None
+        print("M3U8 error:", e)
+
+    return None
