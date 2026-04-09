@@ -1,16 +1,14 @@
 import requests
 import re
 from bs4 import BeautifulSoup
-from .common import extract_m3u8_from_dm
+from .common import get_dm_m3u8
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
 def extract_animexin(url):
     try:
         r = requests.get(url, headers=headers)
-        html = r.text
-
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(r.text, "html.parser")
 
         iframe = soup.find("iframe")
 
@@ -21,7 +19,7 @@ def extract_animexin(url):
                 vid = re.search(r'/video/([a-zA-Z0-9]+)', src)
                 if vid:
                     dm = f"https://www.dailymotion.com/video/{vid.group(1)}"
-                    m3u8 = extract_m3u8_from_dm(dm)
+                    m3u8 = get_dm_m3u8(dm)
                     return dm, m3u8
 
         return None, None
