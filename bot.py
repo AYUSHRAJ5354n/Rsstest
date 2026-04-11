@@ -101,7 +101,7 @@ async def upload_site(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     posts = scrape_site(SITES[site])
 
-    for title, link, img in posts[:2]:
+    for title, link, img in posts[:4]:
         await send_post(context.application, title, link, img, site)
 
 
@@ -113,7 +113,7 @@ async def update_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_active(site):
             posts = scrape_site(SITES[site])
 
-            for title, link, img in posts[:2]:
+            for title, link, img in posts[:6]:
                 await send_post(context.application, title, link, img, site)
 
 
