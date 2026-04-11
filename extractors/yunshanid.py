@@ -1,42 +1,78 @@
-import requests
-import re
-from bs4 import BeautifulSoup
-from .common import get_dm_m3u8
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import time
 
-headers = {"User-Agent": "Mozilla/5.0"}
+
+def extract_yunshanid_home():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Chrome(options=options)
+
+    driver.get("https://yunshanid.site/")
+    time.sleep(5)
+
+    posts = []
+
+    cards = driver.find_elements(By.CSS_SELECTOR, "div.group.relative")
+
+    for card in cards[:10]:
+        try:
+            title = card.find_element(By.CSS_SELECTOR, "div.text-[11px]").text
+            img = card.find_element(By.TAG_NAME, "img").get_attribute("src")
+
+            # 🔥 CLICK TO OPEN (SPA navigation)
+            card.click()
+            time.sleep(3)
+
+            url = driver.current_url
+
+            posts.append((title, url, img))
+
+            driver.back()
+            time.sleep(2)
+
+        except:
+            continue
+
+    driver.quit()
+    return posts
 
 
 def extract_yunshanid(url):
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    import time
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    time.sleep(5)
+
+    dm = None
+    m3u8 = None
+
     try:
-        print("🔍 Yunshan URL:", url)
+        iframe = driver.find_element(By.TAG_NAME, "iframe")
+        src = iframe.get_attribute("src")
 
-        r = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
+        if "dailymotion" in src:
+            vid = src.split("video=")[-1].split("&")[0]
+            dm = f"https://www.dailymotion.com/video/{vid}"
 
-        # 🔥 check ALL iframes
-        iframes = soup.find_all("iframe")
+            # 🔥 YOUR WORKING M3U8 LOGIC
+            from extractors.common import get_dm_m3u8
+            m3u8 = get_dm_m3u8(dm)
 
-        for iframe in iframes:
-            src = iframe.get("src", "")
+    except:
+        pass
 
-            if "dailymotion" in src:
-                print("➡️ Found iframe:", src)
-
-                match = re.search(r'video=([a-zA-Z0-9]+)', src)
-                if match:
-                    vid = match.group(1)
-
-                    dm = f"https://www.dailymotion.com/video/{vid}"
-                    m3u8 = get_dm_m3u8(dm)
-
-                    print("✅ DM:", dm)
-                    print("✅ M3U8:", m3u8)
-
-                    return dm, m3u8
-
-        print("❌ No DM found")
-        return None, None
-
-    except Exception as e:
-        print("Yunshan error:", e)
-        return None, None
+    driver.quit()
+    return dm, m3u8
